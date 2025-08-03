@@ -416,7 +416,7 @@ export default function StartupDilutionCalculator() {
         parsedState = JSON.parse(saveString)
       } catch (jsonError) {
         // If direct parse fails, try decompressing (assuming it's a URL-compressed string)
-        const decompressedString = LZString.decompressFromEncodedURIComponent(saveString) // Use decompressFromEncodedURIComponent
+        const decompressedString = LZString.decompressFromBase64(saveString) // Use decompressFromBase64 for textarea input
         if (decompressedString) {
           parsedState = JSON.parse(decompressedString)
         } else {
@@ -466,6 +466,15 @@ export default function StartupDilutionCalculator() {
           <h1 className="text-4xl font-bold text-gray-900">Startup Equity Dilution Calculator</h1>
           <p className="text-gray-600">Model how ownership changes through funding rounds</p>
         </div>
+
+        {/* New explanatory text */}
+        <p className="text-center text-sm text-gray-700 bg-gray-100 p-3 rounded-lg shadow-sm">
+          To use this tool, start by adjusting the "Initial Ownership" and then add "Funding Rounds" below. Make changes
+          to investment amounts, valuations, and currencies as needed. You can save your current configuration by
+          clicking "Copy Config" and pasting it somewhere safe, or generate a shareable URL with "Share URL". **All
+          calculations and data are processed purely client-side in your browser; nothing is stored on a server.**
+        </p>
+
         {/* Save/Load Controls */}
         <Card className="bg-white border shadow-sm">
           <CardContent className="py-4">
