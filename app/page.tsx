@@ -469,10 +469,10 @@ export default function StartupDilutionCalculator() {
 
         {/* New explanatory text */}
         <p className="text-center text-sm text-gray-700 bg-gray-100 p-3 rounded-lg shadow-sm">
-          To use this tool, start by adjusting the "Initial Ownership" and then add "Funding Rounds" below. Make changes
-          to investment amounts, valuations, and currencies as needed. You can save your current configuration by
-          clicking "Copy Config" and pasting it somewhere safe, or generate a shareable URL with "Share URL". **All
-          calculations and data are processed purely client-side in your browser; nothing is stored on a server.**
+          To use this tool, click "Add Funding Round" to add round, or adjust existing rounds (invest amount and
+          valuation). You can save your current configuration by clicking "Copy Config" and pasting it somewhere safe,
+          or generate a shareable URL with "Share URL" which embeds your configuration in the URL. If you make changes
+          you need to generate a new URL..
         </p>
 
         {/* Save/Load Controls */}
@@ -878,7 +878,7 @@ export default function StartupDilutionCalculator() {
             .
           </p>
           <p className="mt-1">
-            All code is running client side. If you want any features added, feel free to get in touch!
+            All code is running client side. If you want any features added, feel free to get in touch.
           </p>
         </footer>
       </div>
