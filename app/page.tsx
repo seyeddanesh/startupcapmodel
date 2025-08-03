@@ -20,7 +20,7 @@ interface Shareholder {
 interface FundingRound {
   id: string
   name: string
-  currency: "GBP" | "USD"
+  currency: "GBP" | "USD" | "EUR" // Added EUR
   investmentAmount: number
   valuationType: "pre-money" | "post-money"
   valuationSource: "manual" | "reference"
@@ -37,24 +37,56 @@ interface FundingRound {
 interface ExchangeRates {
   "USD-GBP": number
   "GBP-USD": number
+  "USD-EUR": number // Added USD-EUR
+  "EUR-USD": number // Added EUR-USD
+  "GBP-EUR": number // Added GBP-EUR
+  "EUR-GBP": number // Added EUR-GBP
 }
 
 interface SavedState {
   founderName: string
   rounds: Omit<FundingRound, "capTable">[]
-  exchangeRates?: ExchangeRates
+  // Only store the primary rates in the config
+  exchangeRates?: {
+    "USD-GBP": number
+    "USD-EUR": number
+  }
 }
 
-// Default exchange rates
-const DEFAULT_EXCHANGE_RATES: ExchangeRates = {
+// Default exchange rates (primary rates)
+const DEFAULT_PRIMARY_EXCHANGE_RATES = {
   "USD-GBP": 0.79,
-  "GBP-USD": 1.27,
+  "USD-EUR": 0.92,
+}
+
+// Function to derive all exchange rates from primary ones
+const deriveAllExchangeRates = (primaryRates: { "USD-GBP": number; "USD-EUR": number }): ExchangeRates => {
+  const usdGbp = primaryRates["USD-GBP"]
+  const usdEur = primaryRates["USD-EUR"]
+
+  const gbpUsd = usdGbp > 0 ? 1 / usdGbp : 0
+  const eurUsd = usdEur > 0 ? 1 / usdEur : 0
+
+  const gbpEur = usdGbp > 0 ? usdEur / usdGbp : 0 // GBP to USD * USD to EUR
+  const eurGbp = usdEur > 0 ? usdGbp / usdEur : 0 // EUR to USD * USD to GBP
+
+  return {
+    "USD-GBP": usdGbp,
+    "GBP-USD": Number(gbpUsd.toFixed(4)),
+    "USD-EUR": usdEur,
+    "EUR-USD": Number(eurUsd.toFixed(4)),
+    "GBP-EUR": Number(gbpEur.toFixed(4)),
+    "EUR-GBP": Number(eurGbp.toFixed(4)),
+  }
 }
 
 export default function StartupDilutionCalculator() {
   const [founderName, setFounderName] = useState("Founders")
   const [rounds, setRounds] = useState<FundingRound[]>([])
-  const [exchangeRates, setExchangeRates] = useState<ExchangeRates>(DEFAULT_EXCHANGE_RATES)
+  const [primaryExchangeRates, setPrimaryExchangeRates] = useState(DEFAULT_PRIMARY_EXCHANGE_RATES)
+  const [allExchangeRates, setAllExchangeRates] = useState<ExchangeRates>(
+    deriveAllExchangeRates(DEFAULT_PRIMARY_EXCHANGE_RATES),
+  )
   const [saveString, setSaveString] = useState("")
   const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [showExchangeSettings, setShowExchangeSettings] = useState(false)
@@ -63,6 +95,11 @@ export default function StartupDilutionCalculator() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { toast } = useToast()
+
+  // Update allExchangeRates whenever primaryExchangeRates change
+  useEffect(() => {
+    setAllExchangeRates(deriveAllExchangeRates(primaryExchangeRates))
+  }, [primaryExchangeRates])
 
   // Load state from URL on mount
   useEffect(() => {
@@ -98,7 +135,8 @@ export default function StartupDilutionCalculator() {
 
   const convertCurrency = (amount: number, fromCurrency: string, toCurrency: string): number => {
     if (fromCurrency === toCurrency) return amount
-    const rate = exchangeRates[`${fromCurrency}-${toCurrency}` as keyof ExchangeRates]
+    const rateKey = `${fromCurrency}-${toCurrency}` as keyof ExchangeRates
+    const rate = allExchangeRates[rateKey]
     return amount * (rate || 1)
   }
 
@@ -291,7 +329,7 @@ export default function StartupDilutionCalculator() {
   }
 
   const formatCurrency = (amount: number, currency: string) => {
-    const symbol = currency === "GBP" ? "£" : "$"
+    const symbol = currency === "GBP" ? "£" : currency === "EUR" ? "€" : "$"
     return `${symbol}${amount.toLocaleString()}`
   }
 
@@ -310,7 +348,7 @@ export default function StartupDilutionCalculator() {
     const state: SavedState = {
       founderName,
       rounds: rounds.map(({ capTable, ...round }) => round), // Exclude capTable as it's calculated
-      exchangeRates,
+      exchangeRates: primaryExchangeRates, // Only store primary rates
     }
     return JSON.stringify(state)
   }
@@ -318,9 +356,11 @@ export default function StartupDilutionCalculator() {
   const loadState = (state: SavedState) => {
     setFounderName(state.founderName)
 
-    // Load exchange rates if provided, otherwise use defaults
+    // Load primary exchange rates if provided, otherwise use defaults
     if (state.exchangeRates) {
-      setExchangeRates(state.exchangeRates)
+      setPrimaryExchangeRates(state.exchangeRates)
+    } else {
+      setPrimaryExchangeRates(DEFAULT_PRIMARY_EXCHANGE_RATES)
     }
 
     // Restore rounds without cap tables (they'll be recalculated)
@@ -374,48 +414,33 @@ export default function StartupDilutionCalculator() {
     })
   }
 
-  // Update exchange rate - automatically calculate the inverse
-  const updateExchangeRate = (direction: "USD-GBP", value: number) => {
-    const inverseValue = value > 0 ? 1 / value : 0
-    setExchangeRates({
-      "USD-GBP": value,
-      "GBP-USD": Number(inverseValue.toFixed(4)),
-    })
+  // Update primary exchange rates
+  const updatePrimaryExchangeRate = (key: "USD-GBP" | "USD-EUR", value: number) => {
+    setPrimaryExchangeRates((prev) => ({
+      ...prev,
+      [key]: value,
+    }))
   }
 
   return (
     <div className="min-h-screen bg-gray-50 p-4">
-      {" "}
-      {/* Changed background */}
       <div className="max-w-5xl mx-auto space-y-6">
-        {" "}
-        {/* Increased overall spacing */}
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold text-gray-900">Startup Equity Dilution Calculator</h1>
           <p className="text-gray-600">Model how ownership changes through funding rounds</p>
         </div>
         {/* Save/Load Controls */}
         <Card className="bg-white border shadow-sm">
-          {" "}
-          {/* Modern card style */}
           <CardContent className="py-4">
-            {" "}
-            {/* Increased padding */}
             <div className="space-y-3">
-              {" "}
-              {/* Increased spacing */}
               {feedbackMessage && (
                 <div className="text-center">
                   <span className="text-sm text-gray-700 bg-gray-100 px-3 py-1 rounded-full animate-pulse">
-                    {" "}
-                    {/* Muted feedback */}
                     {feedbackMessage}
                   </span>
                 </div>
               )}
               <div className="flex flex-wrap gap-3 justify-center">
-                {" "}
-                {/* Increased gap */}
                 <Button onClick={handleCopyState} variant="outline" size="sm">
                   <Copy className="h-4 w-4 mr-2" />
                   Copy Config
@@ -432,8 +457,6 @@ export default function StartupDilutionCalculator() {
             </div>
             {showSaveDialog && (
               <div className="mt-4 space-y-3">
-                {" "}
-                {/* Increased spacing */}
                 <Label htmlFor="saveString" className="text-sm text-gray-700">
                   Paste Configuration String:
                 </Label>
@@ -442,7 +465,7 @@ export default function StartupDilutionCalculator() {
                   value={saveString}
                   onChange={(e) => setSaveString(e.target.value)}
                   placeholder="Paste your configuration string here..."
-                  className="h-20 text-sm border-gray-300 focus:border-gray-500" // Subtle border
+                  className="h-16 text-sm border-gray-300 focus:border-gray-500"
                 />
                 <Button onClick={handleLoadState} size="sm">
                   Apply Configuration
@@ -453,44 +476,56 @@ export default function StartupDilutionCalculator() {
         </Card>
         {/* Exchange Rate Settings */}
         <Card className="bg-white border shadow-sm">
-          {" "}
-          {/* Modern card style */}
           <CardContent className="py-4">
-            {" "}
-            {/* Increased padding */}
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <p className="text-sm text-gray-700">
-                  <strong>Exchange Rates:</strong> 1 USD = {exchangeRates["USD-GBP"]} GBP | 1 GBP ={" "}
-                  {exchangeRates["GBP-USD"]} USD
+                  <strong>Exchange Rates:</strong> 1 USD = {allExchangeRates["USD-GBP"]} GBP | 1 USD ={" "}
+                  {allExchangeRates["USD-EUR"]} EUR
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  1 GBP = {allExchangeRates["GBP-USD"]} USD | 1 EUR = {allExchangeRates["EUR-USD"]} USD
+                </p>
+                <p className="text-xs text-gray-500">
+                  1 GBP = {allExchangeRates["GBP-EUR"]} EUR | 1 EUR = {allExchangeRates["EUR-GBP"]} GBP
                 </p>
               </div>
               <Button
                 onClick={() => setShowExchangeSettings(!showExchangeSettings)}
                 variant="ghost"
                 size="sm"
-                className="text-gray-600 hover:text-gray-800" // Muted icon color
+                className="text-gray-600 hover:text-gray-800"
               >
                 <Settings className="h-4 w-4" />
               </Button>
             </div>
             {showExchangeSettings && (
-              <div className="mt-4">
-                {" "}
-                {/* Increased spacing */}
-                <div className="max-w-xs">
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
                   <Label htmlFor="usd-gbp-rate" className="text-sm text-gray-700">
-                    USD to GBP Rate (GBP to USD calculated automatically)
+                    USD to GBP Rate
                   </Label>
                   <Input
                     id="usd-gbp-rate"
                     type="number"
                     step="0.0001"
-                    value={exchangeRates["USD-GBP"]}
-                    onChange={(e) => updateExchangeRate("USD-GBP", Number(e.target.value))}
-                    className="mt-1 border-gray-300 focus:border-gray-500" // Subtle border
+                    value={primaryExchangeRates["USD-GBP"]}
+                    onChange={(e) => updatePrimaryExchangeRate("USD-GBP", Number(e.target.value))}
+                    className="mt-1 border-gray-300 focus:border-gray-500"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Inverse rate: 1 GBP = {exchangeRates["GBP-USD"]} USD</p>
+                </div>
+                <div>
+                  <Label htmlFor="usd-eur-rate" className="text-sm text-gray-700">
+                    USD to EUR Rate
+                  </Label>
+                  <Input
+                    id="usd-eur-rate"
+                    type="number"
+                    step="0.0001"
+                    value={primaryExchangeRates["USD-EUR"]}
+                    onChange={(e) => updatePrimaryExchangeRate("USD-EUR", Number(e.target.value))}
+                    className="mt-1 border-gray-300 focus:border-gray-500"
+                  />
                 </div>
               </div>
             )}
@@ -498,15 +533,10 @@ export default function StartupDilutionCalculator() {
         </Card>
         {/* Initial Founders Section */}
         <Card className="bg-white border shadow-sm">
-          {" "}
-          {/* Modern card style */}
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-gray-800 text-lg">🚀 Initial Ownership</CardTitle>{" "}
-            {/* Muted title color */}
+            <CardTitle className="flex items-center gap-2 text-gray-800 text-lg">🚀 Initial Ownership</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {" "}
-            {/* Increased spacing */}
             <div>
               <Label htmlFor="founderName" className="text-sm text-gray-700">
                 Founder/Team Name
@@ -516,18 +546,14 @@ export default function StartupDilutionCalculator() {
                 value={founderName}
                 onChange={(e) => setFounderName(e.target.value)}
                 placeholder="Enter founder or team name"
-                className="mt-1 border-gray-300 focus:border-gray-500" // Subtle border
+                className="mt-1 border-gray-300 focus:border-gray-500"
               />
             </div>
             <div className="bg-gray-50 rounded-lg p-3">
-              {" "}
-              {/* Subtle background for inner section */}
               <h4 className="font-medium mb-2 text-sm text-gray-800">Cap Table</h4>
               <div className="space-y-1">
                 {getInitialCapTable().map((shareholder, index) => (
                   <div key={index} className="flex justify-between items-center py-1 px-2 bg-white rounded text-sm">
-                    {" "}
-                    {/* White background for rows */}
                     <span className="font-medium text-gray-800">{shareholder.name}</span>
                     <div className="text-right">
                       <span className="font-semibold text-gray-900">{shareholder.percentage.toFixed(1)}%</span>
@@ -542,26 +568,20 @@ export default function StartupDilutionCalculator() {
         {/* Funding Rounds */}
         {rounds.map((round, index) => (
           <Card key={round.id} className="bg-white border shadow-sm">
-            {" "}
-            {/* Modern card style */}
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between text-gray-800 text-lg">
-                {" "}
-                {/* Muted title color */}
                 <span className="flex items-center gap-2">💰 {round.name}</span>
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => removeRound(round.id)}
-                  className="text-gray-600 hover:text-red-600" // Muted icon, red on hover
+                  className="text-gray-600 hover:text-red-600"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {" "}
-              {/* Increased spacing */}
               {/* Basic Info Row */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                 <div>
@@ -587,6 +607,7 @@ export default function StartupDilutionCalculator() {
                     <SelectContent>
                       <SelectItem value="USD">USD ($)</SelectItem>
                       <SelectItem value="GBP">GBP (£)</SelectItem>
+                      <SelectItem value="EUR">EUR (€)</SelectItem> {/* Added EUR */}
                     </SelectContent>
                   </Select>
                 </div>
@@ -620,8 +641,6 @@ export default function StartupDilutionCalculator() {
               </div>
               {/* Valuation Section */}
               <div className="bg-gray-50 rounded-lg p-3 space-y-3">
-                {" "}
-                {/* Subtle background for inner section */}
                 <h4 className="font-medium text-sm text-gray-800">Valuation Settings</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
@@ -717,8 +736,6 @@ export default function StartupDilutionCalculator() {
               </div>
               {round.postMoneyValuation > 0 && (
                 <div className="bg-gray-50 rounded-lg p-3 space-y-3">
-                  {" "}
-                  {/* Subtle background for inner section */}
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1 text-sm text-gray-700">
                       <div className="flex justify-between">
@@ -734,8 +751,6 @@ export default function StartupDilutionCalculator() {
                         </span>
                       </div>
                       <div className="flex justify-between border-t pt-1 border-gray-200">
-                        {" "}
-                        {/* Subtle border */}
                         <span>Post-Money:</span>
                         <span className="font-semibold text-gray-900">
                           {formatCurrency(round.postMoneyValuation, round.currency)}
@@ -757,7 +772,7 @@ export default function StartupDilutionCalculator() {
                       {round.capTable.map((shareholder, index) => (
                         <div
                           key={index}
-                          className="flex justify-between items-center py-1 px-2 bg-white rounded text-sm" // White background for rows
+                          className="flex justify-between items-center py-1 px-2 bg-white rounded text-sm"
                         >
                           <span className="font-medium text-gray-800">{shareholder.name}</span>
                           <div className="text-right">
@@ -776,12 +791,47 @@ export default function StartupDilutionCalculator() {
         {/* Add Round Button */}
         <div className="text-center">
           <Button onClick={addRound} className="bg-gray-900 hover:bg-gray-700 text-white">
-            {" "}
-            {/* Darker, more neutral button */}
             <Plus className="h-4 w-4 mr-2" />
             Add Funding Round
           </Button>
         </div>
+
+        {/* Footer */}
+        <footer className="text-center text-sm text-gray-600 mt-8 py-4 border-t border-gray-200">
+          <p>
+            This was made by{" "}
+            <a
+              href="https://linkedin.com/in/seyeddanesh"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >
+              Seyed Danesh
+            </a>{" "}
+            using{" "}
+            <a
+              href="https://v0.dev"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >
+              v0
+            </a>{" "}
+            deployed on{" "}
+            <a
+              href="https://vercel.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >
+              Vercel
+            </a>
+            .
+          </p>
+          <p className="mt-1">
+            All code is running client side. If you want any features added, feel free to get in touch!
+          </p>
+        </footer>
       </div>
     </div>
   )
