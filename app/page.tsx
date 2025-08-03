@@ -101,6 +101,14 @@ export default function StartupDilutionCalculator() {
     setAllExchangeRates(deriveAllExchangeRates(primaryExchangeRates))
   }, [primaryExchangeRates])
 
+  // Recalculate all rounds when exchange rates change
+  useEffect(() => {
+    // Only recalculate if there are rounds to avoid unnecessary initial calculations
+    if (rounds.length > 0) {
+      setRounds((prevRounds) => recalculateAllRounds(prevRounds))
+    }
+  }, [allExchangeRates]) // Dependency on allExchangeRates
+
   // Load state from URL on mount
   useEffect(() => {
     const stateParam = searchParams.get("state")
@@ -600,7 +608,10 @@ export default function StartupDilutionCalculator() {
                   <Label htmlFor={`currency-${round.id}`} className="text-sm text-gray-700">
                     Currency
                   </Label>
-                  <Select value={round.currency} onValueChange={(value) => updateRound(round.id, "currency", value)}>
+                  <Select
+                    value={round.currency}
+                    onValueChange={(value) => updateRound(round.id, "currency", value as "USD" | "GBP" | "EUR")}
+                  >
                     <SelectTrigger className="mt-1 border-gray-300 focus:border-gray-500">
                       <SelectValue />
                     </SelectTrigger>
