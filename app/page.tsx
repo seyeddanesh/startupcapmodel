@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Plus, Trash2, Copy, Upload, Share, Settings } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import LZString from "lz-string" // Import lz-string
 
 interface Shareholder {
   name: string
@@ -65,10 +66,9 @@ const deriveAllExchangeRates = (primaryRates: { "USD-GBP": number; "USD-EUR": nu
   const usdEur = primaryRates["USD-EUR"]
 
   const gbpUsd = usdGbp > 0 ? 1 / usdGbp : 0
-  const eurUsd = usdEur > 0 ? 1 / usdEur : 0
-
   const gbpEur = usdGbp > 0 ? usdEur / usdGbp : 0 // GBP to USD * USD to EUR
   const eurGbp = usdEur > 0 ? usdGbp / usdEur : 0 // EUR to USD * USD to GBP
+  const eurUsd = usdEur > 0 ? 1 / usdEur : 0 // Fixed: should be 1 / usdEur
 
   return {
     "USD-GBP": usdGbp,
@@ -114,13 +114,18 @@ export default function StartupDilutionCalculator() {
     const stateParam = searchParams.get("state")
     if (stateParam) {
       try {
-        const decodedState = decodeURIComponent(stateParam)
-        const parsedState = JSON.parse(decodedState)
-        loadState(parsedState)
-        toast({
-          title: "State loaded",
-          description: "Configuration loaded from URL successfully",
-        })
+        // Decompress the state from the URL using the correct LZString method
+        const decompressedState = LZString.decompressFromEncodedURIComponent(stateParam)
+        if (decompressedState) {
+          const parsedState = JSON.parse(decompressedState)
+          loadState(parsedState)
+          toast({
+            title: "State loaded",
+            description: "Configuration loaded from URL successfully",
+          })
+        } else {
+          throw new Error("Decompression failed or invalid URL string")
+        }
       } catch (error) {
         toast({
           title: "Error",
@@ -351,14 +356,25 @@ export default function StartupDilutionCalculator() {
     return rounds.slice(currentIndex + 1).filter((r) => r.postMoneyValuation > 0)
   }
 
-  // Save/Load functionality
-  const generateSaveString = (): string => {
+  // Generates the full, uncompressed JSON string for copy/paste
+  const generateFullSaveString = (): string => {
     const state: SavedState = {
       founderName,
       rounds: rounds.map(({ capTable, ...round }) => round), // Exclude capTable as it's calculated
       exchangeRates: primaryExchangeRates, // Only store primary rates
     }
-    return JSON.stringify(state)
+    return JSON.stringify(state, null, 2) // Pretty print for readability
+  }
+
+  // Generates the compressed string for URL sharing
+  const generateCompressedSaveString = (): string => {
+    const state: SavedState = {
+      founderName,
+      rounds: rounds.map(({ capTable, ...round }) => round),
+      exchangeRates: primaryExchangeRates,
+    }
+    // Use compressToEncodedURIComponent directly for URL-safe output
+    return LZString.compressToEncodedURIComponent(JSON.stringify(state))
   }
 
   const loadState = (state: SavedState) => {
@@ -382,7 +398,7 @@ export default function StartupDilutionCalculator() {
   }
 
   const handleCopyState = () => {
-    const stateString = generateSaveString()
+    const stateString = generateFullSaveString() // Use the full, readable string
     navigator.clipboard.writeText(stateString)
     setFeedbackMessage("Config copied to clipboard!")
     toast({
@@ -393,7 +409,21 @@ export default function StartupDilutionCalculator() {
 
   const handleLoadState = () => {
     try {
-      const parsedState = JSON.parse(saveString)
+      // For loading from textarea, assume it's either compressed (from URL copy) or uncompressed
+      let parsedState: SavedState
+      try {
+        // Try to parse directly (uncompressed)
+        parsedState = JSON.parse(saveString)
+      } catch (jsonError) {
+        // If direct parse fails, try decompressing (assuming it's a URL-compressed string)
+        const decompressedString = LZString.decompressFromEncodedURIComponent(saveString) // Use decompressFromEncodedURIComponent
+        if (decompressedString) {
+          parsedState = JSON.parse(decompressedString)
+        } else {
+          throw new Error("Decompression failed or invalid string")
+        }
+      }
+
       loadState(parsedState)
       setSaveString("")
       setShowSaveDialog(false)
@@ -411,9 +441,8 @@ export default function StartupDilutionCalculator() {
   }
 
   const handleShareURL = () => {
-    const stateString = generateSaveString()
-    const encodedState = encodeURIComponent(stateString)
-    const url = `${window.location.origin}${window.location.pathname}?state=${encodedState}`
+    const stateString = generateCompressedSaveString() // This now returns the URL-safe compressed string
+    const url = `${window.location.origin}${window.location.pathname}?state=${stateString}` // No need for encodeURIComponent here
     navigator.clipboard.writeText(url)
     setFeedbackMessage("URL copied to clipboard!")
     toast({
@@ -618,7 +647,7 @@ export default function StartupDilutionCalculator() {
                     <SelectContent>
                       <SelectItem value="USD">USD ($)</SelectItem>
                       <SelectItem value="GBP">GBP (£)</SelectItem>
-                      <SelectItem value="EUR">EUR (€)</SelectItem> {/* Added EUR */}
+                      <SelectItem value="EUR">EUR (€)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
