@@ -472,7 +472,7 @@ export default function StartupDilutionCalculator() {
           To use this tool, click "Add Funding Round" to add round, or adjust existing rounds (invest amount and
           valuation). You can save your current configuration by clicking "Copy Config" and pasting it somewhere safe,
           or generate a shareable URL with "Share URL" which embeds your configuration in the URL. If you make changes
-          you need to generate a new URL..
+          you need to generate a new URL. Nothing is stored server side, everything's emdedded in the URL.
         </p>
 
         {/* Save/Load Controls */}
