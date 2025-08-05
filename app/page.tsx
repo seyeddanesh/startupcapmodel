@@ -37,6 +37,8 @@ interface FundingRound {
   newInvestorName: string
   capTable: Shareholder[]
   order: number
+  totalSharesAfter: number
+  newSharesIssued: number
 }
 
 interface OptionPool {
@@ -46,6 +48,8 @@ interface OptionPool {
   percentage: number
   capTable: Shareholder[]
   order: number
+  totalSharesAfter: number
+  newSharesIssued: number
 }
 
 type Event = FundingRound | OptionPool
@@ -61,6 +65,7 @@ interface ExchangeRates {
 
 interface ModelData {
   founderName: string
+  initialShares: number
   events: Event[]
 }
 
@@ -72,10 +77,12 @@ interface SavedState {
   }
   modelA: {
     founderName: string
+    initialShares: number
     events: Omit<Event, "capTable">[]
   }
   modelB?: {
     founderName: string
+    initialShares: number
     events: Omit<Event, "capTable">[]
   }
 }
@@ -112,10 +119,12 @@ export default function StartupDilutionCalculator() {
 
   // Model A state (primary model)
   const [founderNameA, setFounderNameA] = useState("Founders")
+  const [initialSharesA, setInitialSharesA] = useState(10000000)
   const [eventsA, setEventsA] = useState<Event[]>([])
 
   // Model B state (comparison model)
   const [founderNameB, setFounderNameB] = useState("Founders")
+  const [initialSharesB, setInitialSharesB] = useState(10000000)
   const [eventsB, setEventsB] = useState<Event[]>([])
 
   // Shared state
@@ -143,12 +152,12 @@ export default function StartupDilutionCalculator() {
   // Recalculate all events when exchange rates change
   useEffect(() => {
     if (eventsA.length > 0) {
-      setEventsA((prevEvents) => recalculateAllEvents(prevEvents, founderNameA))
+      setEventsA((prevEvents) => recalculateAllEvents(prevEvents, founderNameA, initialSharesA))
     }
     if (comparisonMode && eventsB.length > 0) {
-      setEventsB((prevEvents) => recalculateAllEvents(prevEvents, founderNameB))
+      setEventsB((prevEvents) => recalculateAllEvents(prevEvents, founderNameB, initialSharesB))
     }
-  }, [allExchangeRates, founderNameA, founderNameB])
+  }, [allExchangeRates, founderNameA, founderNameB, initialSharesA, initialSharesB])
 
   // Load state from URL on mount
   useEffect(() => {
@@ -191,6 +200,7 @@ export default function StartupDilutionCalculator() {
     if (!comparisonMode) {
       // Clone model A to model B
       setFounderNameB(founderNameA)
+      setInitialSharesB(initialSharesA)
       setEventsB(JSON.parse(JSON.stringify(eventsA)))
       setComparisonMode(true)
       setActiveTab("modelA")
@@ -217,6 +227,7 @@ export default function StartupDilutionCalculator() {
   const copyModelAToB = () => {
     if (comparisonMode) {
       setFounderNameB(founderNameA)
+      setInitialSharesB(initialSharesA)
       setEventsB(JSON.parse(JSON.stringify(eventsA)))
       toast({
         title: "Model Copied",
@@ -229,6 +240,7 @@ export default function StartupDilutionCalculator() {
   const copyModelBToA = () => {
     if (comparisonMode) {
       setFounderNameA(founderNameB)
+      setInitialSharesA(initialSharesB)
       setEventsA(JSON.parse(JSON.stringify(eventsB)))
       toast({
         title: "Model Copied",
@@ -253,6 +265,7 @@ export default function StartupDilutionCalculator() {
     const setEvents = model === "A" ? setEventsA : setEventsB
     const setActiveInsertionPoint = model === "A" ? setActiveInsertionPointA : setActiveInsertionPointB
     const founderName = model === "A" ? founderNameA : founderNameB
+    const initialShares = model === "A" ? initialSharesA : initialSharesB
 
     const roundNumber = events.filter((e) => e.type === "funding").length + 1
     let newOrder: number
@@ -286,9 +299,11 @@ export default function StartupDilutionCalculator() {
           newInvestorName: `Series ${String.fromCharCode(64 + roundNumber)} Investor`,
           capTable: [],
           order: newOrder,
+          totalSharesAfter: 0,
+          newSharesIssued: 0,
         }
 
-        return recalculateAllEvents([...updatedEvents, newRound], founderName)
+        return recalculateAllEvents([...updatedEvents, newRound], founderName, initialShares)
       })
     } else {
       newOrder = getNextOrder(events)
@@ -309,6 +324,8 @@ export default function StartupDilutionCalculator() {
         newInvestorName: `Series ${String.fromCharCode(64 + roundNumber)} Investor`,
         capTable: [],
         order: newOrder,
+        totalSharesAfter: 0,
+        newSharesIssued: 0,
       }
       setEvents([...events, newRound])
     }
@@ -320,6 +337,7 @@ export default function StartupDilutionCalculator() {
     const setEvents = model === "A" ? setEventsA : setEventsB
     const setActiveInsertionPoint = model === "A" ? setActiveInsertionPointA : setActiveInsertionPointB
     const founderName = model === "A" ? founderNameA : founderNameB
+    const initialShares = model === "A" ? initialSharesA : initialSharesB
 
     const poolNumber = events.filter((e) => e.type === "option-pool").length + 1
     let newOrder: number
@@ -343,9 +361,11 @@ export default function StartupDilutionCalculator() {
           percentage: 10,
           capTable: [],
           order: newOrder,
+          totalSharesAfter: 0,
+          newSharesIssued: 0,
         }
 
-        return recalculateAllEvents([...updatedEvents, newPool], founderName)
+        return recalculateAllEvents([...updatedEvents, newPool], founderName, initialShares)
       })
     } else {
       newOrder = getNextOrder(events)
@@ -356,8 +376,10 @@ export default function StartupDilutionCalculator() {
         percentage: 10,
         capTable: [],
         order: newOrder,
+        totalSharesAfter: 0,
+        newSharesIssued: 0,
       }
-      setEvents(recalculateAllEvents([...events, newPool], founderName))
+      setEvents(recalculateAllEvents([...events, newPool], founderName, initialShares))
     }
     setActiveInsertionPoint(null)
   }
@@ -397,11 +419,12 @@ export default function StartupDilutionCalculator() {
     return result
   }
 
-  const recalculateAllEvents = (updatedEvents: Event[], founderName: string): Event[] => {
+  const recalculateAllEvents = (updatedEvents: Event[], founderName: string, initialShares: number): Event[] => {
     // Sort events by order
     const sortedEvents = [...updatedEvents].sort((a, b) => a.order - b.order)
     const result: Event[] = []
-    let currentCapTable: Shareholder[] = getInitialCapTable(founderName)
+    let currentCapTable: Shareholder[] = getInitialCapTable(founderName, initialShares)
+    let currentTotalShares = initialShares
 
     // First pass: calculate all funding rounds with manual valuations
     // and initialize reference-based rounds with temporary values
@@ -437,11 +460,17 @@ export default function StartupDilutionCalculator() {
           preMoneyValuation,
           postMoneyValuation,
           capTable: [],
+          totalSharesAfter: 0,
+          newSharesIssued: 0,
         }
 
         tempResults.push(tempRound)
       } else {
-        tempResults.push({ ...event })
+        tempResults.push({
+          ...event,
+          totalSharesAfter: 0,
+          newSharesIssued: 0,
+        })
       }
     }
 
@@ -498,6 +527,8 @@ export default function StartupDilutionCalculator() {
                   preMoneyValuation,
                   postMoneyValuation,
                   capTable: [],
+                  totalSharesAfter: 0,
+                  newSharesIssued: 0,
                 }
               }
             } else {
@@ -509,111 +540,172 @@ export default function StartupDilutionCalculator() {
       }
     }
 
-    // Third pass: calculate cap tables in order
-    currentCapTable = getInitialCapTable(founderName)
+    // Third pass: calculate cap tables and share counts in order
+    currentCapTable = getInitialCapTable(founderName, initialShares)
+    currentTotalShares = initialShares
 
     for (const event of tempResults) {
       if (event.type === "funding") {
         const round = event as FundingRound
 
-        // Calculate cap table for this funding round
-        const capTable = calculateCapTableForFundingRound(round, currentCapTable)
+        // Calculate cap table and shares for this funding round
+        const { capTable, totalSharesAfter, newSharesIssued } = calculateCapTableForFundingRound(
+          round,
+          currentCapTable,
+          currentTotalShares,
+        )
 
         const updatedRound: FundingRound = {
           ...round,
           capTable,
+          totalSharesAfter,
+          newSharesIssued,
         }
 
         result.push(updatedRound)
         currentCapTable = capTable
+        currentTotalShares = totalSharesAfter
       } else if (event.type === "option-pool") {
         const pool = event as OptionPool
 
-        // Calculate option pool dilution
-        const capTable = calculateCapTableForOptionPool(pool, currentCapTable)
+        // Calculate option pool dilution and shares
+        const { capTable, totalSharesAfter, newSharesIssued } = calculateCapTableForOptionPool(
+          pool,
+          currentCapTable,
+          currentTotalShares,
+        )
 
         const updatedPool: OptionPool = {
           ...pool,
           capTable,
+          totalSharesAfter,
+          newSharesIssued,
         }
 
         result.push(updatedPool)
         currentCapTable = capTable
+        currentTotalShares = totalSharesAfter
       }
     }
 
     return result
   }
 
-  const calculateCapTableForFundingRound = (round: FundingRound, previousCapTable: Shareholder[]): Shareholder[] => {
-    if (round.postMoneyValuation <= 0 || round.investmentAmount <= 0) return previousCapTable
+  const calculateCapTableForFundingRound = (
+    round: FundingRound,
+    previousCapTable: Shareholder[],
+    previousTotalShares: number,
+  ): { capTable: Shareholder[]; totalSharesAfter: number; newSharesIssued: number } => {
+    if (round.postMoneyValuation <= 0 || round.investmentAmount <= 0) {
+      return {
+        capTable: previousCapTable,
+        totalSharesAfter: previousTotalShares,
+        newSharesIssued: 0,
+      }
+    }
 
     // Calculate new investor ownership percentage
     const newInvestorPercentage = (round.investmentAmount / round.postMoneyValuation) * 100
 
     // Validate that the new investor percentage is reasonable
     if (newInvestorPercentage <= 0 || newInvestorPercentage >= 100) {
-      return previousCapTable
+      return {
+        capTable: previousCapTable,
+        totalSharesAfter: previousTotalShares,
+        newSharesIssued: 0,
+      }
     }
 
-    // Calculate dilution factor for existing shareholders
-    const dilutionFactor = (100 - newInvestorPercentage) / 100
+    // Calculate new shares to issue
+    // If investor gets X% of post-money, then:
+    // newShares / (previousShares + newShares) = X/100
+    // newShares = (X/100) * (previousShares + newShares)
+    // newShares = (X/100) * previousShares / (1 - X/100)
+    const newSharesIssued = Math.round(
+      ((newInvestorPercentage / 100) * previousTotalShares) / (1 - newInvestorPercentage / 100),
+    )
+    const totalSharesAfter = previousTotalShares + newSharesIssued
 
-    // Create new cap table
+    // Create new cap table with actual share counts
     const newCapTable: Shareholder[] = []
 
-    // Add diluted existing shareholders
+    // Add existing shareholders (their share count stays the same, but percentage dilutes)
     previousCapTable.forEach((shareholder) => {
-      const newPercentage = shareholder.percentage * dilutionFactor
+      const newPercentage = (shareholder.shares / totalSharesAfter) * 100
       if (newPercentage > 0.01) {
         newCapTable.push({
           name: shareholder.name,
-          shares: Math.round(shareholder.shares * dilutionFactor),
+          shares: shareholder.shares, // Share count stays the same
           percentage: newPercentage,
         })
       }
     })
 
     // Add new investor
-    const newInvestorShares = Math.round((newInvestorPercentage / 100) * 1000000)
     newCapTable.push({
       name: round.newInvestorName,
-      shares: newInvestorShares,
+      shares: newSharesIssued,
       percentage: newInvestorPercentage,
     })
 
-    return newCapTable
+    return {
+      capTable: newCapTable,
+      totalSharesAfter,
+      newSharesIssued,
+    }
   }
 
-  const calculateCapTableForOptionPool = (pool: OptionPool, previousCapTable: Shareholder[]): Shareholder[] => {
+  const calculateCapTableForOptionPool = (
+    pool: OptionPool,
+    previousCapTable: Shareholder[],
+    previousTotalShares: number,
+  ): { capTable: Shareholder[]; totalSharesAfter: number; newSharesIssued: number } => {
     const poolPercentage = pool.percentage
     if (poolPercentage <= 0 || poolPercentage >= 100) {
-      return previousCapTable
+      return {
+        capTable: previousCapTable,
+        totalSharesAfter: previousTotalShares,
+        newSharesIssued: 0,
+      }
     }
 
-    // Dilute existing shareholders
-    const dilutionFactor = (100 - poolPercentage) / 100
-    const dilutedCapTable: Shareholder[] = previousCapTable.map((shareholder) => ({
-      ...shareholder,
-      shares: Math.round(shareholder.shares * dilutionFactor),
-      percentage: shareholder.percentage * dilutionFactor,
-    }))
+    // Calculate new shares to issue for option pool
+    // Similar to funding round calculation
+    const newSharesIssued = Math.round(((poolPercentage / 100) * previousTotalShares) / (1 - poolPercentage / 100))
+    const totalSharesAfter = previousTotalShares + newSharesIssued
+
+    // Create new cap table
+    const newCapTable: Shareholder[] = []
+
+    // Add existing shareholders (their share count stays the same, but percentage dilutes)
+    previousCapTable.forEach((shareholder) => {
+      const newPercentage = (shareholder.shares / totalSharesAfter) * 100
+      newCapTable.push({
+        name: shareholder.name,
+        shares: shareholder.shares, // Share count stays the same
+        percentage: newPercentage,
+      })
+    })
 
     // Add option pool
-    const optionPoolShares = Math.round((poolPercentage / 100) * 1000000)
-    dilutedCapTable.push({
+    newCapTable.push({
       name: pool.name,
-      shares: optionPoolShares,
+      shares: newSharesIssued,
       percentage: poolPercentage,
     })
 
-    return dilutedCapTable
+    return {
+      capTable: newCapTable,
+      totalSharesAfter,
+      newSharesIssued,
+    }
   }
 
   const updateEvent = (model: "A" | "B", eventId: string, field: string, value: any) => {
     const events = model === "A" ? eventsA : eventsB
     const setEvents = model === "A" ? setEventsA : setEventsB
     const founderName = model === "A" ? founderNameA : founderNameB
+    const initialShares = model === "A" ? initialSharesA : initialSharesB
 
     setEvents((prevEvents) => {
       const updatedEvents = prevEvents.map((event) => {
@@ -623,7 +715,7 @@ export default function StartupDilutionCalculator() {
         return event
       })
 
-      return recalculateAllEvents(updatedEvents, founderName)
+      return recalculateAllEvents(updatedEvents, founderName, initialShares)
     })
   }
 
@@ -631,6 +723,7 @@ export default function StartupDilutionCalculator() {
     const events = model === "A" ? eventsA : eventsB
     const setEvents = model === "A" ? setEventsA : setEventsB
     const founderName = model === "A" ? founderNameA : founderNameB
+    const initialShares = model === "A" ? initialSharesA : initialSharesB
 
     setEvents((prevEvents) => {
       // Remove the event
@@ -651,7 +744,7 @@ export default function StartupDilutionCalculator() {
         return event
       })
 
-      return recalculateAllEvents(cleanedEvents, founderName)
+      return recalculateAllEvents(cleanedEvents, founderName, initialShares)
     })
   }
 
@@ -660,8 +753,8 @@ export default function StartupDilutionCalculator() {
     return `${symbol}${amount.toLocaleString()}`
   }
 
-  const getInitialCapTable = (founderName: string): Shareholder[] => {
-    return [{ name: founderName, shares: 1000000, percentage: 100 }]
+  const getInitialCapTable = (founderName: string, initialShares: number): Shareholder[] => {
+    return [{ name: founderName, shares: initialShares, percentage: 100 }]
   }
 
   // Get available rounds for reference (only future funding rounds to avoid cycles)
@@ -683,11 +776,13 @@ export default function StartupDilutionCalculator() {
       exchangeRates: primaryExchangeRates,
       modelA: {
         founderName: founderNameA,
+        initialShares: initialSharesA,
         events: eventsA.map(({ capTable, ...event }) => event),
       },
       ...(comparisonMode && {
         modelB: {
           founderName: founderNameB,
+          initialShares: initialSharesB,
           events: eventsB.map(({ capTable, ...event }) => event),
         },
       }),
@@ -702,11 +797,13 @@ export default function StartupDilutionCalculator() {
       exchangeRates: primaryExchangeRates,
       modelA: {
         founderName: founderNameA,
+        initialShares: initialSharesA,
         events: eventsA.map(({ capTable, ...event }) => event),
       },
       ...(comparisonMode && {
         modelB: {
           founderName: founderNameB,
+          initialShares: initialSharesB,
           events: eventsB.map(({ capTable, ...event }) => event),
         },
       }),
@@ -729,23 +826,34 @@ export default function StartupDilutionCalculator() {
 
       // Load model A
       setFounderNameA(state.modelA.founderName || "Founders")
+      setInitialSharesA(state.modelA.initialShares || 10000000)
       const eventsA = state.modelA.events.map((eventData: any) => ({
         ...eventData,
         capTable: [],
+        totalSharesAfter: 0,
+        newSharesIssued: 0,
       }))
-      setEventsA(recalculateAllEvents(eventsA, state.modelA.founderName || "Founders"))
+      setEventsA(
+        recalculateAllEvents(eventsA, state.modelA.founderName || "Founders", state.modelA.initialShares || 10000000),
+      )
 
       // Load model B if in comparison mode
       if (state.comparisonMode && state.modelB) {
         setFounderNameB(state.modelB.founderName || "Founders")
+        setInitialSharesB(state.modelB.initialShares || 10000000)
         const eventsB = state.modelB.events.map((eventData: any) => ({
           ...eventData,
           capTable: [],
+          totalSharesAfter: 0,
+          newSharesIssued: 0,
         }))
-        setEventsB(recalculateAllEvents(eventsB, state.modelB.founderName || "Founders"))
+        setEventsB(
+          recalculateAllEvents(eventsB, state.modelB.founderName || "Founders", state.modelB.initialShares || 10000000),
+        )
       } else {
         // Initialize model B with model A data
         setFounderNameB(state.modelA.founderName || "Founders")
+        setInitialSharesB(state.modelA.initialShares || 10000000)
         setEventsB(JSON.parse(JSON.stringify(eventsA)))
       }
     } else {
@@ -758,14 +866,17 @@ export default function StartupDilutionCalculator() {
 
       setComparisonMode(false)
       setFounderNameA(state.founderName || "Founders")
+      setInitialSharesA(10000000) // Default for legacy
 
       // Load events (backwards compatibility)
       if (state.events) {
         const restoredEvents = state.events.map((eventData: any) => ({
           ...eventData,
           capTable: [],
+          totalSharesAfter: 0,
+          newSharesIssued: 0,
         }))
-        setEventsA(recalculateAllEvents(restoredEvents, state.founderName || "Founders"))
+        setEventsA(recalculateAllEvents(restoredEvents, state.founderName || "Founders", 10000000))
       } else {
         // Handle old format with separate rounds and optionPools
         const legacyState = state
@@ -778,6 +889,8 @@ export default function StartupDilutionCalculator() {
               type: "funding",
               capTable: [],
               order: index * 2 + 1,
+              totalSharesAfter: 0,
+              newSharesIssued: 0,
             })
           })
         }
@@ -789,15 +902,18 @@ export default function StartupDilutionCalculator() {
               type: "option-pool",
               capTable: [],
               order: index * 2 + 2,
+              totalSharesAfter: 0,
+              newSharesIssued: 0,
             })
           })
         }
 
-        setEventsA(recalculateAllEvents(restoredEvents, state.founderName || "Founders"))
+        setEventsA(recalculateAllEvents(restoredEvents, state.founderName || "Founders", 10000000))
       }
 
       // Initialize model B with model A data
       setFounderNameB(state.founderName || "Founders")
+      setInitialSharesB(10000000)
       setEventsB(JSON.parse(JSON.stringify(eventsA)))
     }
   }
@@ -1014,6 +1130,8 @@ export default function StartupDilutionCalculator() {
     const events = model === "A" ? sortedEventsA : sortedEventsB
     const founderName = model === "A" ? founderNameA : founderNameB
     const setFounderName = model === "A" ? setFounderNameA : setFounderNameB
+    const initialShares = model === "A" ? initialSharesA : initialSharesB
+    const setInitialShares = model === "A" ? setInitialSharesA : setInitialSharesB
 
     return (
       <div className="space-y-6">
@@ -1030,21 +1148,38 @@ export default function StartupDilutionCalculator() {
             <CardTitle className="flex items-center gap-2 text-gray-800 text-lg">🚀 Initial Ownership</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor={`founderName${model}`} className="text-sm text-gray-700">
-                Founder/Team Name
-              </Label>
-              <Input
-                id={`founderName${model}`}
-                value={founderName}
-                onChange={(e) => setFounderName(e.target.value)}
-                placeholder="Enter founder or team name"
-                className="mt-1 border-gray-300 focus:border-gray-500"
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor={`founderName${model}`} className="text-sm text-gray-700">
+                  Founder/Team Name
+                </Label>
+                <Input
+                  id={`founderName${model}`}
+                  value={founderName}
+                  onChange={(e) => setFounderName(e.target.value)}
+                  placeholder="Enter founder or team name"
+                  className="mt-1 border-gray-300 focus:border-gray-500"
+                />
+              </div>
+              <div>
+                <Label htmlFor={`initialShares${model}`} className="text-sm text-gray-700">
+                  Initial Shares
+                </Label>
+                <Input
+                  id={`initialShares${model}`}
+                  type="number"
+                  value={initialShares || ""}
+                  onChange={(e) => setInitialShares(Number(e.target.value))}
+                  placeholder="10000000"
+                  className="mt-1 border-gray-300 focus:border-gray-500"
+                />
+              </div>
             </div>
             <div className="bg-gray-50 rounded-lg p-3">
               <h4 className="font-medium mb-3 text-sm text-gray-800">Cap Table</h4>
-              <div className="space-y-1">{renderCapTable(getInitialCapTable(founderName), founderName, [], 0)}</div>
+              <div className="space-y-1">
+                {renderCapTable(getInitialCapTable(founderName, initialShares), founderName, [], 0)}
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -1250,13 +1385,19 @@ export default function StartupDilutionCalculator() {
                               </div>
                             </div>
 
-                            {event.valuationSource === "reference" && event.referenceRoundId && (
-                              <div className="text-xs text-gray-600 space-y-1">
-                                <div>Source: {events.find((e) => e.id === event.referenceRoundId)?.name}</div>
-                                {event.discountPercentage > 0 && <div>Discount: {event.discountPercentage}%</div>}
-                                <div>Calculated: {formatCurrency(event.calculatedValuation, event.currency)}</div>
+                            <div className="text-xs text-gray-600 space-y-1">
+                              {event.valuationSource === "reference" && event.referenceRoundId && (
+                                <>
+                                  <div>Source: {events.find((e) => e.id === event.referenceRoundId)?.name}</div>
+                                  {event.discountPercentage > 0 && <div>Discount: {event.discountPercentage}%</div>}
+                                  <div>Calculated: {formatCurrency(event.calculatedValuation, event.currency)}</div>
+                                </>
+                              )}
+                              <div className="border-t pt-1 border-gray-200">
+                                <div>New shares: {event.newSharesIssued.toLocaleString()}</div>
+                                <div>Total shares: {event.totalSharesAfter.toLocaleString()}</div>
                               </div>
-                            )}
+                            </div>
                           </div>
                         </div>
                       </>
@@ -1319,12 +1460,18 @@ export default function StartupDilutionCalculator() {
                   </div>
 
                   {event.percentage > 0 && (
-                    <div className="bg-gray-50 rounded-lg p-3">
-                      <h4 className="font-medium mb-3 text-sm text-gray-800">Cap Table After {event.name}</h4>
-                      <div className="space-y-1">
-                        {renderCapTable(event.capTable, founderName, events, event.order)}
+                    <>
+                      <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600">
+                        <div>New shares issued: {event.newSharesIssued.toLocaleString()}</div>
+                        <div>Total shares after: {event.totalSharesAfter.toLocaleString()}</div>
                       </div>
-                    </div>
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <h4 className="font-medium mb-3 text-sm text-gray-800">Cap Table After {event.name}</h4>
+                        <div className="space-y-1">
+                          {renderCapTable(event.capTable, founderName, events, event.order)}
+                        </div>
+                      </div>
+                    </>
                   )}
                 </CardContent>
               </Card>
